@@ -1,0 +1,322 @@
+sdMAF of X chromosome Axiom array genotyped
+##################################################################################################
+###Use Plink to calculate genotype counts PAR1 & PAR2
+
+plink2 --bfile ukb22418_cXY_b0_v2 --geno-counts --keep caucasianaxiomchrx.txt --keep-males --out chrXYaNoAneuploidy
+plink2 --bfile ukb22418_cXY_b0_v2 --geno-counts --keep caucasianaxiomchrx.txt --keep-females --out chrXYaNoAneuploidy
+
+###Use Plink to calculate genotype counts NPR & PAR3
+
+plink2 --bfile ukb22418_cX_b0_v2 --geno-counts --keep caucasianaxiomchrx.txt --keep-males --out chrXaNoAneuploidy
+plink2 --bfile ukb22418_cX_b0_v2 --geno-counts --keep caucasianaxiomchrx.txt --keep-females --out chrXaNoAneuploidy
+
+### R code
+```{r}
+# r function on NPR
+wald.1df.hwd.xchr <- function(x)
+  # 'Wald' type, 1 d.f. assuming HWD, Xchr 
+  # x is a vector with elements F_A1A1,F_A1A2,F_A2A2,M_A1A1.A1,M_A1A2,M_A2A2.A2 respectively
+{
+  r0 = x[1]; r1 = x[2]; r2 = x[3]; s0 = x[4]; s1 = x[5]; s2 = x[6]
+  s = s0+s2; r = r0+r1+r2
+  pM = s2/s; pF = (0.5*r1+r2)/r 
+  pAA.F = r2/r
+  delta.F = pAA.F-pF^2
+  stat = (pM-pF)^2/(1/s*(pM*(1-pM))+1/(2*r)*(pF*(1-pF)+delta.F))
+  -pchisq(as.numeric(stat),df=1,lower.tail = F,log.p=T)/log(10)     # -log10
+}
+
+loop_func <- function(df){
+  LOG10P <- c()
+  for (i in 1:nrow(df)) {
+    LOG10P <- c(LOG10P,wald.1df.hwd.xchr(df[i,5:10]))
+  }
+  cbind(df,LOG10P)
+}
+```
+
+```{r}
+#NPR
+fe <- read.table("/mnt/project/MAF/Array/Female/chrXa.gcount")
+ma <- read.table("/mnt/project/MAF/Array/Male/chrXa.gcount")
+names(fe) <- c("CHROM","ID","REF","ALT","HOM_REF_CT","HET_REF_ALT_CTS","TWO_ALT_GENO_CTS","HAP_REF_CT","HAP_ALT_CTS","MISSING_CT")
+names(ma) <- c("CHROM","ID","REF","ALT","HOM_REF_CT","HET_REF_ALT_CTS","TWO_ALT_GENO_CTS","HAP_REF_CT","HAP_ALT_CTS","MISSING_CT")
+cx <- read.table("/mnt/project/Bulk/Genotype Results/Genotype calls/ukb22418_cX_b0_v2.bim",header =F)
+# put two data frame into one 
+npr <- cbind(fe[,1:7],ma[,8],0,ma[,9])
+names(npr)[3:10] <- c("A1","A2","F_A1A1","F_A1A2","F_A2A2","M_A1A1.A1","M_A1A2","M_A2A2.A2")
+nprwithP <- loop_func(npr)
+nprwithP$hg19BP <- cx$V4
+nprwithP$Mmissing <- ma$MISSING_CT
+nprwithP$Fmissing <- fe$MISSING_CT
+nprwithP <- nprwithP[,c(1:4,12:14,5:11)]
+```
+
+```{r}
+#PAR
+fe <- read.table("/mnt/project/MAF/Array/Female/chrXYa.gcount")
+ma <- read.table("/mnt/project/MAF/Array/Male/chrXYa.gcount")
+names(fe) <- c("CHROM","ID","REF","ALT","HOM_REF_CT","HET_REF_ALT_CTS","TWO_ALT_GENO_CTS","HAP_REF_CT","HAP_ALT_CTS","MISSING_CT")
+names(ma) <- c("CHROM","ID","REF","ALT","HOM_REF_CT","HET_REF_ALT_CTS","TWO_ALT_GENO_CTS","HAP_REF_CT","HAP_ALT_CTS","MISSING_CT")
+cxy <- read.table("/mnt/project/Bulk/Genotype Results/Genotype calls/ukb22418_cXY_b0_v2.bim",header =F)
+# put two data frame into one 
+par <- cbind(fe[,1:7],ma[,5:7])
+names(par)[3:10] <- c("A1","A2","F_A1A1","F_A1A2","F_A2A2","M_A1A1.A1","M_A1A2","M_A2A2.A2")
+parwithP <- loop_func1(par)
+parwithP$hg19BP <- cxy$V4
+parwithP$Mmissing <- ma$MISSING_CT
+parwithP$Fmissing <- fe$MISSING_CT
+parwithP <- parwithP[,c(1:4,12:14,5:11)]
+```
+```{r}
+chrX <- rbind(parwithP,nprwithP)
+chrX <- chrX[order(chrX$hg19BP),]
+chrX$CHROM <- as.factor(chrX$CHROM)
+# compute allele frequency
+chrX$Ffreq <- (0.5*chrX$F_A1A2+chrX$F_A2A2)/(chrX$F_A1A1+chrX$F_A1A2+chrX$F_A2A2)
+chrX$Mfreq <- (0.5*chrX$M_A1A2+chrX$M_A2A2)/(chrX$M_A1A1+chrX$M_A1A2+chrX$M_A2A2)
+chrX$Fmaf <- ifelse(chrX$Ffreq>0.5,1-chrX$Ffreq,chrX$Ffreq)
+chrX$Mmaf <- ifelse(chrX$Mfreq>0.5,1-chrX$Mfreq,chrX$Mfreq)
+chrX$DIFmaf <- chrX$Fmaf - chrX$Mmaf
+# separate PAR3 from NPR
+chrX$CHROM[chrX$hg19BP>88.4E6&chrX$hg19BP<92E6] <- "XY"
+ukb_snp_qc <- read.table("ukb_snp_qc.txt",header =T)  #Downloaded from biobank.ctsu.ox.ac.uk/ukb/ukb/auxdata/ukb_snp_qc.txt
+cx <- ukb_snp_qc[ukb_snp_qc$chromosome==23 | ukb_snp_qc$chromosome==25,]
+cx <- cx[order(cx$position),]
+chrX$QCbatch <- rowSums(cx[,10:104])
+chrxb <- chrX[nchar(chrX$A2)==1&nchar(chrX$A1)==1,]
+chrxb <- chrxb[!is.na(chrxb$LOG10P),]
+```
+##################################################################################################
+
+sdMAF of Autosomes Axiom array genotyped
+##################################################################################################
+### use Plink to calculate genotype counts
+
+for chr in {1..22}; do
+  plink2 --bfile ukb22418_c${chr}_b0_v2 --geno-counts --keep caucasianaxiom.txt --keep-males --out chr${chr}a
+done
+
+for chr in {1..22}; do
+  plink2 --bfile ukb22418_c${chr}_b0_v2 --geno-counts --keep caucasianaxiom.txt --keep-females --out chr${chr}a
+done
+
+### R code computing sdMAF LOG10P ###
+
+#### functions ####
+```{r}
+wald.1df.hwd.auto <- function(x)
+  # 'Wald' type, 1 d.f. assuming HWD, Autosomal 
+  # x is a vector with elements F_A1A1,F_A1A2,F_A2A2,M_A1A1.A1,M_A1A2,M_A2A2.A2 respectively
+{
+  r0 = x[1]; r1 = x[2]; r2 = x[3]; s0 = x[4]; s1 = x[5]; s2 = x[6]
+  s = s0+s1+s2; r = r0+r1+r2
+  pM = (0.5*s1+s2)/s; pF = (0.5*r1+r2)/r
+  pAA.M = s2/s; pAA.F = r2/r
+  delta.M = pAA.M-pM^2; delta.F = pAA.F-pF^2
+  stat = (pM-pF)^2/(1/(2*s)*(pM*(1-pM)+delta.M)+1/(2*r)*(pF*(1-pF)+delta.F))
+  -pchisq(as.numeric(stat),df=1,lower.tail = F,log.p=T)/log(10)     # -log10
+}
+
+loop_func1 <- function(df){
+  LOG10P <- c()
+  for (i in 1:nrow(df)) {
+    LOG10P <- c(LOG10P,wald.1df.hwd.auto(df[i,5:10]))
+  }
+  cbind(df,LOG10P)
+}
+```
+
+```{r}
+#### initialize a empty dataframe ####
+columns = c("CHROM","ID","A1","A2","hg19BP","Mmissing","Fmissing","F_A1A1","F_A1A2","F_A2A2","M_A1A1.A1","M_A1A2","M_A2A2.A2","LOG10P") 
+genome = data.frame(matrix(nrow = 0, ncol = length(columns))) 
+colnames(genome) = columns
+
+#### Loop over chromosomes ####
+for (chr in 1:22) {
+  print(paste0("Now calculating chromosome ",chr,"."))
+  fe <- read.table(paste0("/mnt/project/MAF/Array/Female/chr",chr,"a.gcount"))
+  ma <- read.table(paste0("/mnt/project/MAF/Array/Male/chr",chr,"a.gcount"))
+  names(fe) <- c("CHROM","ID","REF","ALT","HOM_REF_CT","HET_REF_ALT_CTS","TWO_ALT_GENO_CTS","HAP_REF_CT","HAP_ALT_CTS","MISSING_CT")
+  names(ma) <- c("CHROM","ID","REF","ALT","HOM_REF_CT","HET_REF_ALT_CTS","TWO_ALT_GENO_CTS","HAP_REF_CT","HAP_ALT_CTS","MISSING_CT")
+  ch <- read.table(paste0("/mnt/project/Bulk/Genotype Results/Genotype calls/ukb22418_c",chr,"_b0_v2.bim"),header =F)
+  chrom <- cbind(fe[,1:7],ma[,5:7])
+  names(chrom)[3:10] <- c("A1","A2","F_A1A1","F_A1A2","F_A2A2","M_A1A1.A1","M_A1A2","M_A2A2.A2") 
+  chromwithP <- loop_func1(chrom)
+  chromwithP$hg19BP <- ch$V4
+  chromwithP$Mmissing <- ma$MISSING_CT
+  chromwithP$Fmissing <- fe$MISSING_CT
+  chromwithP <- chromwithP[,c(1:4,12:14,5:11)]
+  genome <- rbind(genome,chromwithP)
+}
+summary(genome$CHROM)
+```
+
+```{r}
+#### compute allele frequency 
+genome$Ffreq <- (0.5*genome$F_A1A2+genome$F_A2A2)/(genome$F_A1A1+genome$F_A1A2+genome$F_A2A2)
+genome$Mfreq <- (0.5*genome$M_A1A2+genome$M_A2A2)/(genome$M_A1A1+genome$M_A1A2+genome$M_A2A2)
+genome$Fmaf <- ifelse(genome$Ffreq>0.5,1-genome$Ffreq,genome$Ffreq)
+genome$Mmaf <- ifelse(genome$Ffreq>0.5,1-genome$Mfreq,genome$Mfreq)
+genome$DIFmaf <- genome$Fmaf - genome$Mmaf
+genome$QCbatch <- rowSums(ukb_snp_qc[,10:104])
+####filter for only biallelic variants, minor allele counts
+genome <- genome[nchar(genome$A2)==1&nchar(genome$A1)==1&!(duplicated(genome$hg19BP)|duplicated(genome$hg19BP,fromLast = T)),]
+genome <- genome[genome$QCbatch==95,]
+genome <- genomeb[!is.na(genome$LOG10P),]
+genome <- genome[(2*genome$M_A1A1.A1+genome$M_A1A2+2*genome$F_A1A1+genome$F_A1A2 >= 10) & (genome$M_A1A2+2*genome$M_A2A2.A2+genome$F_A1A2+2*genome$F_A2A2 >= 10),]
+```
+##################################################################################################
+
+sdMAF of X chromosome Axiom array imputed
+##################################################################################################
+### compute genotype counts for NPR & PAR3
+plink2 --bgen ukb22828_cX_b0_v3.bgen ref-first --sample ukb22828_cX_b0_v3.sample --geno-counts --keep caucasianaxiomchrx.txt --keep-males --out chrXaNoAneuploidy
+plink2 --bgen ukb22828_cX_b0_v3.bgen ref-first --sample ukb22828_cX_b0_v3.sample --geno-counts --keep caucasianaxiomchrx.txt --keep-females --out chrXaNoAneuploidy
+
+### compute genotype counts for PAR1 & PAR2
+plink2 --bgen ukb22828_cXY_b0_v3.bgen ref-first --sample ukb22828_cXY_b0_v3.sample --geno-counts --keep caucasianaxiomchrx.txt --keep-males --out chrXYaNoAneuploidy
+plink2 --bgen ukb22828_cXY_b0_v3.bgen ref-first --sample ukb22828_cXY_b0_v3.sample --geno-counts --keep caucasianaxiomchrx.txt --keep-females --out chrXYaNoAneuploidy
+
+### create bim files 
+plink2 --bgen ukb22828_cX_b0_v3.bgen ref-first --sample ukb22828_cX_b0_v3.sample --make-just-bim --out ukb22828_cX_b0_v3
+plink2 --bgen ukb22828_cXY_b0_v3.bgen ref-first --sample ukb22828_cXY_b0_v3.sample --make-just-bim --out ukb22828_cXY_b0_v3
+
+##### merge chrXaNoAneuploidy.gcount and chrXYaNoAneuploidy.gcount into one file for both sexes. merge ukb22828_cX_b0_v3.bim and ukb22828_cXY_b0_v3.bim. 
+##### order dataframes by physical position, name them chrXnoaneu.gcount and chrXnoaneu.bim respectively.
+module load R/4.2.1
+ 
+Rscript sdMAF.R \
+-f /.../chrXnoaneu.gcount \
+-m /.../chrXnoaneu.gcount \
+--bim /.../chrXnoaneu.bim \
+--mac 10 \
+-o /.../IMPchrXanoaneu \
+-l /.../IMPchrXnoaneu
+##################################################################################################
+
+sdMAF of Autosomes Axiom array imputed
+##################################################################################################
+### use Plink to create bim files and calculate imputed genotype counts
+
+for chr in {1..22}; do
+  plink2 --bgen ukb22828_c${chr}_b0_v3.bgen ref-first --sample ukb22828_c${chr}_b0_v3.sample --make-just-bim --out chr${chr}
+done
+
+for chr in {1..22}; do
+  plink2 --bgen ukb22828_c${chr}_b0_v3.bgen ref-first --sample ukb22828_c${chr}_b0_v3.sample --keep-females --keep caucasianaxiom.txt --geno-counts --out chr${chr}
+done
+
+for chr in {1..22}; do
+  plink2 --bgen ukb22828_c${chr}_b0_v3.bgen ref-first --sample ukb22828_c${chr}_b0_v3.sample --keep-males --keep caucasianaxiom.txt --geno-counts --out chr${chr}
+done
+
+### compute sdMAF with slurm job array
+
+chr=${SLURM_ARRAY_TASK_ID}
+
+module load R/4.2.1
+ 
+Rscript sdMAF.R \
+-f /.../chr${chr}.gcount \
+-m /.../chr${chr}.gcount \
+--bim /.../chr${chr}.bim \
+--mac 10 \
+-o /.../IMPachr${chr} \
+-l /.../IMPchr${chr}
+
+##################################################################################################
+
+sdMAF of X chromosome whole exome sequenced
+##################################################################################################
+### split pars from nprs and calculate genotype counts
+plink2 --bfile ukb23158_cX_b0_v1 --no-psam-pheno --split-par b38 --make-bed --out ukb23158_cXY_b0_v1
+plink2 --bfile ukb23158_cXY_b0_v1  --no-psam-pheno --keep-females --keep caucasianchrx.txt --geno-counts --out chrXNoAneuploidy
+plink2 --bfile ukb23158_cXY_b0_v1  --no-psam-pheno --keep-males --keep caucasianchrx.txt --geno-counts --out chrXNoAneuploidy
+
+### in HPF
+module load R/4.2.1
+ 
+Rscript sdMAF.R \
+-f /.../chrXNoAneuploidy.gcount \
+-m /.../chrXNoAneuploidy.gcount \
+--mac 10 \
+-o /.../ExomechrXNoAneu \
+-l /.../ExomechrXNoAneu
+##################################################################################################
+
+sdMAF of Autosomes whole exome sequenced
+##################################################################################################
+### use Plink to calculate genotype counts
+
+for chr in {1..22}; do
+  plink2 --bgen ukb23159_c${chr}_b0_v1.bgen ref-first --sample ukb23159_c${chr}_b0_v1.sample --keep-males --keep caucasian.txt --geno-counts --out chr${chr}
+done
+
+for chr in {1..22}; do
+  plink2 --bgen ukb23159_c${chr}_b0_v1.bgen ref-first --sample ukb23159_c${chr}_b0_v1.sample --keep-females --keep caucasian.txt --geno-counts --out chr${chr}
+done
+
+### compute sdMAF with slurm job array
+
+chr=${SLURM_ARRAY_TASK_ID}
+
+module load R/4.2.1
+ 
+Rscript sdMAF.R \
+-f /.../chr${chr}.gcount \
+-m /.../chr${chr}.gcount \
+--mac 10 \
+-o /.../Exomechr${chr} \
+-l /.../chr${chr}Exome
+ 
+##################################################################################################
+
+sdMISSING of X chromosome Axiom array genotyped
+##################################################################################################
+### compute sdMISSING
+module load R/4.2.1
+ 
+Rscript sdMISSING.R /.../GTPchrXanoaneu.sdMAF /.../GTPchrXanoaneu.sdMISSING
+
+##################################################################################################
+
+sdMISSING of Autosomes Axiom array genotyped
+##################################################################################################
+### merge all autosome result to UKBBgtpAxiomAutosomesdMAFResults.txt and compute sdMISSING
+module load R/4.2.1
+ 
+Rscript sdMISSING.R /.../UKBBgtpAxiomAutosomesdMAFResults.txt /.../GTPaxiomautosome.sdMISSING
+
+##################################################################################################
+
+sdMAF of X chromosome whole exome sequenced
+##################################################################################################
+### compute sdMISSING
+module load R/4.2.1
+
+Rscript sdMISSING.R /.../ExomechrXNoAneu.sdMAF /.../WESchrXanoaneu.sdMISSING
+
+##################################################################################################
+
+sdMAF of Autosomes whole exome sequenced
+##################################################################################################
+### compute sdMISSING
+module load R/4.2.1
+
+Rscript sdMISSING.R /.../UKBBExomeAutosomesdMAFResults.txt /.../WESautosome.sdMISSING
+##################################################################################################
+
+Check whole exome sequencing male NPR regions 
+##################################################################################################
+### remove people with sex chromosome aneuploidy and only keep snps with a sex combined minor allele count larger than 10
+plink2 --bfile ukb23158_cXY_b0_v1 --no-psam-pheno --keep keep.txt --chr x --mac 10 --make-bed --out ukb23158_NPR_filtered
+
+### change chr code from X to 22, and only keeping biallelic snps
+plink --bfile ukb23158_NPR_filtered --update-chr update.txt --biallelic-only --make-bed --out ukb23158_CHR_ALTERED
+
+### get male genotype count
+plink2 --bfile ukb23158_CHR_ALTERED --geno-counts  --keep-males --out NPRmale
+
+##################################################################################################
