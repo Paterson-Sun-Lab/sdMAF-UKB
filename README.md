@@ -1,3 +1,7 @@
+Chen DZ, Roshandel D, Wang Z, Sun L, Paterson AD (2023). [Comprehensive whole-genome analyses of the UK Biobank reveal significant sex differences in both genotype missingness and allele frequency on the X chromosome](https://doi.org/10.1093/hmg/ddad201). Human Molecular Genetics.
+
+---
+
 # sdMAF-UKB
 
 ## UKbiobank-sdMAF-&-sdMISSING-Code
